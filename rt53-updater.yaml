@@ -1,0 +1,28 @@
+kind: Deployment
+apiVersion: extensions/v1beta1
+metadata:
+  name: rt53-updater
+  labels:
+    rt53-updater: main
+spec:
+  replicas: 1
+  strategy:
+    type: RollingUpdate
+    rollingUpdate:
+      maxUnavailable: 0
+      maxSurge: 1
+  minReadySeconds: 5
+  template:
+    metadata:
+      labels:
+        run: rt53-updater
+      annotations:
+        kube2iam.beta.nordstrom.net/role: arn:aws:iam::051620159240:role/a0007/k8s/a0007-whatever-you-want
+    spec:
+      containers:
+        - name: rt53-updater
+          image: {{.Image}}
+          imagePullPolicy: Always
+          env:
+            - name: NAMESPACE
+              value: ato-dev

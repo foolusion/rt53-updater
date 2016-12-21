@@ -30,13 +30,34 @@ import (
 
 const (
 	envNamespace = "NAMESPACE"
+	envAWSRegion = "AWS_REGION"
 )
 
+var sess *session.Session
+
 func main() {
+	log.Println("Starting rt53-updater operator...")
+
+	region := os.Getenv(envAWSRegion)
+	if region == "" {
+		log.Fatalf("you must supply environment variable %s", envAWSRegion)
+	}
+
 	namespace := os.Getenv(envNamespace)
 	if namespace == "" {
 		log.Println("Using all namespaces")
 	}
+
+	sess = session.Must(session.NewSession(&aws.Config{
+		HTTPClient: &http.Client{
+			Transport: &http.Transport{
+				TLSClientConfig: &tls.Config{
+					RootCAs: certs.Pool,
+				},
+			},
+		},
+		Region: aws.String(region),
+	}))
 
 	errCh := make(chan error, 1)
 	cancel, err := watchService(namespace, errCh)
@@ -193,17 +214,6 @@ type rt53Config struct {
 	rt53         route
 	loadBalancer route
 }
-
-var sess = session.Must(session.NewSession(&aws.Config{
-	HTTPClient: &http.Client{
-		Transport: &http.Transport{
-			TLSClientConfig: &tls.Config{
-				RootCAs: certs.Pool,
-			},
-		},
-	},
-	Region: aws.String("us-west-2"),
-}))
 
 func getLoadBalancerHostedZone(name string) (string, error) {
 	svc := elb.New(sess)

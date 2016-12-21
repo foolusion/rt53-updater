@@ -32,4 +32,27 @@ all just use the `foolusion/rt53-updater` image from docker hub.
 To deploy take a look at `rt53-updater.yaml` or `kube.yaml` if you used `make`.
 Then run `kubectl apply -f your-deployment-file.yaml`.
 
+## Example Service
+
+When you create a service add the annotations and labels from the example below
+and fill in your route53 DNSName and HostedZoneID.
+
+```yaml
+kind: Service
+apiVersion: v1
+metadata:
+  name: my-service
+  labels:
+    route53: loadBalancer
+  annotations:
+    foolusion-aws-route53-name: my.domain.com
+    foolusion-aws-route53-hostedZone: Z1089BC83EA983
+  spec:
+    type: LoadBalancer
+    selector:
+      app: MyApp
+    ports:
+      targetPort: 8080
+```
+
 PR's, Issues welcome.

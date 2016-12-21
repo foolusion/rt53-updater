@@ -1,5 +1,5 @@
-# rt53-updater
-An app that updates your aws route53 for kubernetes service type loadBalancer
+# rt53-updater An app that updates your aws route53 for kubernetes service type
+loadBalancer
 
 This program is meant to be run in a kubernetes cluster. It talks to the
 kubernetes api and watches all Services with the label route53:loadBalancer.
@@ -15,6 +15,12 @@ There are two environment variables you will need to configure. They are
 `NAMESPACE` and `AWS_REGION`. `NAMESPACE` allows you to filter to only services
 in the specified namespace. `AWS_REGION` is required for the query to
 describe-load-balancers.
+
+In order for aws commands to work the instance profile your cluster workers use
+will need permission to `easticloadbalancing:DescribeLoadBalancers` and
+`route53.ChangeResourceRecordSets`. You can also try using
+(kube2iam)[https://github.com/jtblin/kube2iam], which allows your pods to
+assume other roles.
 
 To Build and create deployment artifacts you can run `make`. If you just want
 to build the go binary you can run `go build`. If you don't want to build at

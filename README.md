@@ -1,5 +1,6 @@
-# rt53-updater An app that updates your aws route53 for kubernetes service type
-loadBalancer
+# rt53-updater
+
+An app that updates your aws route53 for kubernetes service type loadBalancer
 
 This program is meant to be run in a kubernetes cluster. It talks to the
 kubernetes api and watches all Services with the label route53:loadBalancer.

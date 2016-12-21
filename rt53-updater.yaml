@@ -16,8 +16,6 @@ spec:
     metadata:
       labels:
         run: rt53-updater
-      annotations:
-        kube2iam.beta.nordstrom.net/role: arn:aws:iam::051620159240:role/a0007/k8s/a0007-whatever-you-want
     spec:
       containers:
         - name: rt53-updater

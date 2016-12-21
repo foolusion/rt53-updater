@@ -19,7 +19,7 @@ describe-load-balancers.
 In order for aws commands to work the instance profile your cluster workers use
 will need permission to `easticloadbalancing:DescribeLoadBalancers` and
 `route53.ChangeResourceRecordSets`. You can also try using
-(kube2iam)[https://github.com/jtblin/kube2iam], which allows your pods to
+[kube2iam](https://github.com/jtblin/kube2iam), which allows your pods to
 assume other roles.
 
 To Build and create deployment artifacts you can run `make`. If you just want

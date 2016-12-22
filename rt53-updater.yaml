@@ -24,3 +24,5 @@ spec:
           env:
             - name: NAMESPACE
               value: ato-dev
+            - name: AWS_REGION
+              value: us-west-2

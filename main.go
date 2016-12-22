@@ -143,17 +143,19 @@ func watchService(namespace string, errCh chan<- error) (context.CancelFunc, err
 }
 
 func serviceWatcher(ctx context.Context, w watch.Interface, errCh chan<- error) {
-	for {
-		select {
-		case ev := <-w.ResultChan():
-			err := handleEvent(ev)
-			if err != nil {
-				errCh <- errors.Wrap(err, "unable to handle event")
-			}
-		case <-ctx.Done():
-			log.Println("recieved cancel on Service watcher")
-			return
+	go func() {
+		<-ctx.Done()
+		w.Stop()
+	}()
+
+	for ev := range w.ResultChan() {
+		err := handleEvent(ev)
+		if err != nil {
+			errCh <- errors.Wrap(err, "unable to handle event")
 		}
+	}
+	errCh <- &fatalErr{
+		err: fmt.Errorf("watch chan closed"),
 	}
 }
 

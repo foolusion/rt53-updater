@@ -103,7 +103,7 @@ func main() {
 	}))
 
 	errCh := make(chan error, 1)
-	cancel, err := watchService(cfg.namespace, errCh)
+	cancel, err := watchService(errCh)
 	if err != nil {
 		close(errCh)
 		log.Fatal(err)
@@ -141,28 +141,71 @@ func (f *fatalErr) Error() string {
 	return fmt.Sprintf("fatal error: %s", f.err.Error())
 }
 
-func watchService(namespace string, errCh chan<- error) (context.CancelFunc, error) {
-	config, err := rest.InClusterConfig()
-	if err != nil {
-		return nil, errors.Wrap(err, "could not get in cluster config")
+type serviceWatcherConfig struct {
+	config      *rest.Config
+	clientset   *kubernetes.Clientset
+	requirement *labels.Requirement
+	watcher     watch.Interface
+	ctx         context.Context
+	cancel      context.CancelFunc
+	err         error
+}
+
+func (s *serviceWatcherConfig) setConfig() {
+	if s.err != nil {
+		return
+	}
+	s.config, s.err = rest.InClusterConfig()
+}
+
+func (s *serviceWatcherConfig) setClientset() {
+	if s.err != nil {
+		return
+	}
+	s.clientset, s.err = kubernetes.NewForConfig(s.config)
+}
+
+func (s *serviceWatcherConfig) setWatcher() {
+	s.setLabelRequirements()
+	s.setWatcherInterface()
+}
+
+func (s *serviceWatcherConfig) setLabelRequirements() {
+	if s.err != nil {
+		return
 	}
 
-	clientset, err := kubernetes.NewForConfig(config)
-	if err != nil {
-		return nil, errors.Wrap(err, "could not create a new in cluster client")
-	}
+	s.requirement, s.err = labels.NewRequirement("route53", selection.Equals, sets.NewString("loadBalancer"))
+}
 
+func (s *serviceWatcherConfig) setWatcherInterface() {
+	if s.err != nil {
+		return
+	}
 	ls := labels.NewSelector()
-	req, err := labels.NewRequirement("route53", selection.Equals, sets.NewString("loadBalancer"))
-	if err != nil {
-		return nil, errors.Wrap(err, "could not create label requirements")
+	ls.Add(*s.requirement)
+	s.watcher, s.err = s.clientset.Core().Services(cfg.namespace).Watch(
+		api.ListOptions{
+			LabelSelector: ls,
+		},
+	)
+}
+
+func createWatcher() (watch.Interface, error) {
+	s := &serviceWatcherConfig{}
+	s.setConfig()
+	s.setClientset()
+	s.setWatcher()
+	if s.err != nil {
+		return nil, errors.Wrap(s.err, "could not configure watcher")
 	}
-	ls = ls.Add(*req)
-	watcher, err := clientset.Core().Services(namespace).Watch(api.ListOptions{
-		LabelSelector: ls,
-	})
+	return s.watcher, nil
+}
+
+func watchService(errCh chan<- error) (context.CancelFunc, error) {
+	watcher, err := createWatcher()
 	if err != nil {
-		return nil, errors.Wrap(err, "could not create service watcher")
+		return nil, errors.Wrap(err, "could not create a watcher")
 	}
 
 	ctx, cancel := context.WithCancel(context.Background())

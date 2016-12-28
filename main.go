@@ -43,24 +43,53 @@ import (
 )
 
 const (
-	envNamespace = "NAMESPACE"
-	envAWSRegion = "AWS_REGION"
+	envNamespace     = "NAMESPACE"
+	envAWSRegion     = "AWS_REGION"
+	envAnnDNSName    = "DNS_NAME_ANNOTATION"
+	envAnnHostedZone = "HOSTED_ZONE_ANNOTATION"
+
+	annotationDNSName    = "foolusion-aws-route53-dns-name"
+	annotationHostedZone = "foolusion-aws-route53-hosted-zone"
 )
+
+type updaterConfig struct {
+	namespace            string
+	region               string
+	annotationDNSName    string
+	annotationHostedZone string
+}
+
+var cfg = updaterConfig{
+	namespace:            "",
+	region:               "us-west-2",
+	annotationDNSName:    annotationDNSName,
+	annotationHostedZone: annotationHostedZone,
+}
 
 var sess *session.Session
 
 func main() {
 	log.Println("Starting rt53-updater operator...")
 
-	region := os.Getenv(envAWSRegion)
-	if region == "" {
-		log.Fatalf("you must supply environment variable %s", envAWSRegion)
+	if region := os.Getenv(envAWSRegion); region != "" {
+		cfg.region = region
 	}
+	log.Printf("using region %q", cfg.region)
 
-	namespace := os.Getenv(envNamespace)
-	if namespace == "" {
-		log.Println("Using all namespaces")
+	if namespace := os.Getenv(envNamespace); namespace != "" {
+		cfg.namespace = namespace
 	}
+	log.Printf("using namespace %q", cfg.namespace)
+
+	if dnsName := os.Getenv(envAnnDNSName); dnsName != "" {
+		cfg.annotationDNSName = dnsName
+	}
+	log.Printf("using dns name annotation %q", cfg.annotationDNSName)
+
+	if hostedZone := os.Getenv(envAnnHostedZone); hostedZone != "" {
+		cfg.annotationHostedZone = hostedZone
+	}
+	log.Printf("using hosted zone annotation %q", cfg.annotationHostedZone)
 
 	sess = session.Must(session.NewSession(&aws.Config{
 		HTTPClient: &http.Client{
@@ -70,11 +99,11 @@ func main() {
 				},
 			},
 		},
-		Region: aws.String(region),
+		Region: aws.String(cfg.region),
 	}))
 
 	errCh := make(chan error, 1)
-	cancel, err := watchService(namespace, errCh)
+	cancel, err := watchService(cfg.namespace, errCh)
 	if err != nil {
 		close(errCh)
 		log.Fatal(err)
@@ -180,14 +209,14 @@ func handleEvent(ev watch.Event) error {
 
 func updateRoute53(s *v1.Service) (rt53Config, error) {
 	ann := s.GetAnnotations()
-	name, ok := ann["foolusion-aws-route53-name"]
+	name, ok := ann[cfg.annotationDNSName]
 	if !ok {
-		return rt53Config{}, errors.Errorf("service %s missing annotation %s", s.GetName(), "foolusion-aws-route53-name")
+		return rt53Config{}, errors.Errorf("service %s missing annotation %s", s.GetName(), cfg.annotationDNSName)
 	}
 
-	hostedZone, ok := ann["foolusion-aws-route53-hostedZone"]
+	hostedZone, ok := ann[cfg.annotationHostedZone]
 	if !ok {
-		return rt53Config{}, errors.Errorf("service %s missing annotation %s", s.GetName(), "foolusion-aws-route53-hostedZone")
+		return rt53Config{}, errors.Errorf("service %s missing annotation %s", s.GetName(), cfg.annotationHostedZone)
 	}
 
 	rt53Route := route{

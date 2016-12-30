@@ -141,65 +141,30 @@ func (f *fatalErr) Error() string {
 	return fmt.Sprintf("fatal error: %s", f.err.Error())
 }
 
-type serviceWatcherConfig struct {
-	config      *rest.Config
-	clientset   *kubernetes.Clientset
-	requirement *labels.Requirement
-	watcher     watch.Interface
-	ctx         context.Context
-	cancel      context.CancelFunc
-	err         error
-}
-
-func (s *serviceWatcherConfig) setConfig() {
-	if s.err != nil {
-		return
-	}
-	s.config, s.err = rest.InClusterConfig()
-}
-
-func (s *serviceWatcherConfig) setClientset() {
-	if s.err != nil {
-		return
-	}
-	s.clientset, s.err = kubernetes.NewForConfig(s.config)
-}
-
-func (s *serviceWatcherConfig) setWatcher() {
-	s.setLabelRequirements()
-	s.setWatcherInterface()
-}
-
-func (s *serviceWatcherConfig) setLabelRequirements() {
-	if s.err != nil {
-		return
-	}
-
-	s.requirement, s.err = labels.NewRequirement("route53", selection.Equals, sets.NewString("loadBalancer"))
-}
-
-func (s *serviceWatcherConfig) setWatcherInterface() {
-	if s.err != nil {
-		return
-	}
-	ls := labels.NewSelector()
-	ls.Add(*s.requirement)
-	s.watcher, s.err = s.clientset.Core().Services(cfg.namespace).Watch(
-		api.ListOptions{
-			LabelSelector: ls,
-		},
-	)
-}
-
 func createWatcher() (watch.Interface, error) {
-	s := &serviceWatcherConfig{}
-	s.setConfig()
-	s.setClientset()
-	s.setWatcher()
-	if s.err != nil {
-		return nil, errors.Wrap(s.err, "could not configure watcher")
+	config, err := rest.InClusterConfig()
+	if err != nil {
+		return nil, errors.Wrap(err, "could not get in cluster config")
 	}
-	return s.watcher, nil
+
+	clientset, err := kubernetes.NewForConfig(config)
+	if err != nil {
+		return nil, errors.Wrap(err, "could not create a new in cluster client")
+	}
+
+	ls := labels.NewSelector()
+	req, err := labels.NewRequirement("route53", selection.Equals, sets.NewString("loadBalancer"))
+	if err != nil {
+		return nil, errors.Wrap(err, "could not create label requirements")
+	}
+	ls = ls.Add(*req)
+	watcher, err := clientset.Core().Services(cfg.namespace).Watch(api.ListOptions{
+		LabelSelector: ls,
+	})
+	if err != nil {
+		return nil, errors.Wrap(err, "could not create service watcher")
+	}
+	return watcher, nil
 }
 
 func watchService(errCh chan<- error) (context.CancelFunc, error) {
@@ -335,7 +300,7 @@ func setRoute53(r rt53Config) error {
 		ChangeBatch: &route53.ChangeBatch{
 			Changes: []*route53.Change{
 				{
-					Action: aws.String(route53.ChangeActionCreate),
+					Action: aws.String(route53.ChangeActionUpsert),
 					ResourceRecordSet: &route53.ResourceRecordSet{
 						Name: aws.String(r.rt53.dnsName),
 						Type: aws.String(route53.RRTypeA),

@@ -52,6 +52,12 @@ const (
 	annotationHostedZone = "foolusion-aws-route53-hosted-zone"
 )
 
+type watcherErr struct{}
+
+func (w watcherErr) Error() string {
+	return "watch chan closed"
+}
+
 type updaterConfig struct {
 	namespace            string
 	region               string
@@ -108,7 +114,6 @@ func main() {
 		close(errCh)
 		log.Fatal(err)
 	}
-	defer cancel()
 
 	sigCh := make(chan os.Signal, 1)
 	signal.Notify(sigCh, syscall.SIGINT, syscall.SIGTERM)
@@ -116,21 +121,29 @@ func main() {
 		select {
 		case err := <-errCh:
 			switch e := errors.Cause(err).(type) {
+			case *watcherErr:
+				cancel, err = watchService(errCh)
+				if err != nil {
+					shutdown(errCh, sigCh, cancel, 1)
+				}
 			case *fatalErr:
 				log.Println(e)
-				close(sigCh)
-				cancel()
-				os.Exit(1)
+				shutdown(errCh, sigCh, cancel, 1)
 			default:
 				log.Println(e)
 			}
 		case <-sigCh:
 			log.Println("Shutdown signal recieved, exiting...")
-			close(errCh)
-			cancel()
-			os.Exit(0)
+			shutdown(errCh, sigCh, cancel, 0)
 		}
 	}
+}
+
+func shutdown(errCh chan error, sigCh chan os.Signal, cancel context.CancelFunc, status int) {
+	close(sigCh)
+	cancel()
+	close(errCh)
+	os.Exit(status)
 }
 
 type fatalErr struct {
@@ -191,9 +204,7 @@ func serviceWatcher(ctx context.Context, w watch.Interface, errCh chan<- error) 
 			errCh <- errors.Wrap(err, "unable to handle event")
 		}
 	}
-	errCh <- &fatalErr{
-		err: fmt.Errorf("watch chan closed"),
-	}
+	errCh <- watcherErr{}
 }
 
 func handleEvent(ev watch.Event) error {

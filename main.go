@@ -52,6 +52,12 @@ const (
 	annotationHostedZone = "foolusion-aws-route53-hosted-zone"
 )
 
+type watcherErr struct{}
+
+func (w watcherErr) Error() string {
+	return "watch chan closed"
+}
+
 type updaterConfig struct {
 	namespace            string
 	region               string
@@ -103,12 +109,11 @@ func main() {
 	}))
 
 	errCh := make(chan error, 1)
-	cancel, err := watchService(cfg.namespace, errCh)
+	cancel, err := watchService(errCh)
 	if err != nil {
 		close(errCh)
 		log.Fatal(err)
 	}
-	defer cancel()
 
 	sigCh := make(chan os.Signal, 1)
 	signal.Notify(sigCh, syscall.SIGINT, syscall.SIGTERM)
@@ -116,21 +121,29 @@ func main() {
 		select {
 		case err := <-errCh:
 			switch e := errors.Cause(err).(type) {
+			case *watcherErr:
+				cancel, err = watchService(errCh)
+				if err != nil {
+					shutdown(errCh, sigCh, cancel, 1)
+				}
 			case *fatalErr:
 				log.Println(e)
-				close(sigCh)
-				cancel()
-				os.Exit(1)
+				shutdown(errCh, sigCh, cancel, 1)
 			default:
 				log.Println(e)
 			}
 		case <-sigCh:
 			log.Println("Shutdown signal recieved, exiting...")
-			close(errCh)
-			cancel()
-			os.Exit(0)
+			shutdown(errCh, sigCh, cancel, 0)
 		}
 	}
+}
+
+func shutdown(errCh chan error, sigCh chan os.Signal, cancel context.CancelFunc, status int) {
+	close(sigCh)
+	cancel()
+	close(errCh)
+	os.Exit(status)
 }
 
 type fatalErr struct {
@@ -141,7 +154,7 @@ func (f *fatalErr) Error() string {
 	return fmt.Sprintf("fatal error: %s", f.err.Error())
 }
 
-func watchService(namespace string, errCh chan<- error) (context.CancelFunc, error) {
+func createWatcher() (watch.Interface, error) {
 	config, err := rest.InClusterConfig()
 	if err != nil {
 		return nil, errors.Wrap(err, "could not get in cluster config")
@@ -158,11 +171,19 @@ func watchService(namespace string, errCh chan<- error) (context.CancelFunc, err
 		return nil, errors.Wrap(err, "could not create label requirements")
 	}
 	ls = ls.Add(*req)
-	watcher, err := clientset.Core().Services(namespace).Watch(api.ListOptions{
+	watcher, err := clientset.Core().Services(cfg.namespace).Watch(api.ListOptions{
 		LabelSelector: ls,
 	})
 	if err != nil {
 		return nil, errors.Wrap(err, "could not create service watcher")
+	}
+	return watcher, nil
+}
+
+func watchService(errCh chan<- error) (context.CancelFunc, error) {
+	watcher, err := createWatcher()
+	if err != nil {
+		return nil, errors.Wrap(err, "could not create a watcher")
 	}
 
 	ctx, cancel := context.WithCancel(context.Background())
@@ -183,9 +204,7 @@ func serviceWatcher(ctx context.Context, w watch.Interface, errCh chan<- error) 
 			errCh <- errors.Wrap(err, "unable to handle event")
 		}
 	}
-	errCh <- &fatalErr{
-		err: fmt.Errorf("watch chan closed"),
-	}
+	errCh <- watcherErr{}
 }
 
 func handleEvent(ev watch.Event) error {
@@ -292,7 +311,7 @@ func setRoute53(r rt53Config) error {
 		ChangeBatch: &route53.ChangeBatch{
 			Changes: []*route53.Change{
 				{
-					Action: aws.String(route53.ChangeActionCreate),
+					Action: aws.String(route53.ChangeActionUpsert),
 					ResourceRecordSet: &route53.ResourceRecordSet{
 						Name: aws.String(r.rt53.dnsName),
 						Type: aws.String(route53.RRTypeA),
